@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Stock Checking</title>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 15px;
+    }
+
+    h2 {
+      margin-top: 20px;
+    }
+
+    #saveStatus {
+      display: inline-block;
+      margin-left: 10px;
+      font-size: 13px;
+      color: green;
+      font-weight: bold;
+    }
+
+    #restoreInfo {
+      display: none;
+      padding: 10px;
+      margin: 10px 0;
+      background: #fff3cd;
+      border: 1px solid #ffe69c;
+      color: #664d03;
+      font-weight: bold;
+    }
+
+    #scan {
+      width: 300px;
+      padding: 8px;
+      font-size: 16px;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th {
+      background: #eeeeee;
+      padding: 8px;
+    }
+
+    td {
+      padding: 5px;
+    }
+
+    #resetButton {
+      background: #dc3545;
+      color: white;
+      border: none;
+      padding: 7px 12px;
+      margin-left: 10px;
+    }
+
+    #exportButton {
+      padding: 7px 12px;
+    }
+  </style>
+</head>
+
+<body>
+
+<h2>UPLOAD DATA TRANSAKSI (EXCEL)</h2>
+
+<input type="file" id="fileInput" accept=".xlsx,.xls">
+
+<div id="restoreInfo">
+  ⚠️ DATA SEBELUMNYA DITEMUKAN
+  <br>
+  Data pengecekan sebelumnya telah dipulihkan otomatis.
+  <br>
+  <button onclick="lanjutkanData()">Lanjutkan Pengecekan</button>
+  <button onclick="hapusDataTersimpan()">Mulai Dari Awal</button>
+</div>
+
+<h2>SCAN BARANG</h2>
+
+<input
+  type="text"
+  id="scan"
+  placeholder="Scan di sini..."
+  autofocus
+>
+
+<span id="saveStatus">✓ Siap</span>
+
+<br><br>
+
+<button id="exportButton" onclick="exportExcel()">
+  Export Excel
+</button>
+
+<button id="resetButton" onclick="konfirmasiReset()">
+  Reset Pengecekan
+</button>
+
+<h2>HASIL CEK</h2>
+
+<table border="1" id="tabel"></table>
+
+
+<script>
+
+let master = {};
+let scanData = {};
+let scanOrder = [];
+
+
+// =====================================================
+// AUTO SAVE
+// =====================================================
+
+const STORAGE_KEY = "stock_checking_autosave_v1";
+
+
+// Simpan semua data
+function autoSave() {
+
+  try {
+
+    const dataSimpan = {
+      master: master,
+      scanData: scanData,
+      scanOrder: scanOrder,
+      waktu: new Date().toLocaleString("id-ID")
+    };
+
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(dataSimpan)
+    );
+
+    tampilkanStatusSimpan();
+
+  } catch (error) {
+
+    console.error("Gagal menyimpan:", error);
+
+  }
+
+}
+
+
+// Status penyimpanan
+function tampilkanStatusSimpan() {
+
+  const status = document.getElementById("saveStatus");
+
+  status.innerText = "✓ Tersimpan otomatis";
+  status.style.color = "green";
+
+}
+
+
+// =====================================================
+// CEK DATA YANG TERSIMPAN
+// =====================================================
+
+function cekDataTersimpan() {
+
+  const data = localStorage.getItem(STORAGE_KEY);
+
+  if (!data) {
+    return;
+  }
+
+  try {
+
+    const hasil = JSON.parse(data);
+
+    if (
+      hasil.master &&
+      Object.keys(hasil.master).length > 0
+    ) {
+
+      master = hasil.master;
+      scanData = hasil.scanData || {};
+      scanOrder = hasil.scanOrder || [];
+
+      document.getElementById("restoreInfo").style.display = "block";
+
+      render();
+
+    }
+
+  } catch (error) {
+
+    console.error(
+      "Data tersimpan tidak dapat dipulihkan:",
+      error
+    );
+
+  }
+
+}
+
+
+// =====================================================
+// LANJUTKAN DATA
+// =====================================================
+
+function lanjutkanData() {
+
+  document.getElementById("restoreInfo").style.display = "none";
+
+  document.getElementById("scan").focus();
+
+  render();
+
+}
+
+
+// =====================================================
+// HAPUS DATA TERSIMPAN
+// =====================================================
+
+function hapusDataTersimpan() {
+
+  const yakin = confirm(
+    "⚠️ PERINGATAN!\n\n" +
+    "Semua data pengecekan yang tersimpan akan dihapus.\n\n" +
+    "Anda yakin ingin mulai dari awal?"
+  );
+
+  if (!yakin) {
+    return;
+  }
+
+  localStorage.removeItem(STORAGE_KEY);
+
+  master = {};
+  scanData = {};
+  scanOrder = [];
+
+  document.getElementById("restoreInfo").style.display = "none";
+
+  render();
+
+  alert("Data berhasil dihapus. Silakan upload Excel baru.");
+
+}
+
+
+// =====================================================
+// RESET PENGECEKAN
+// =====================================================
+
+function konfirmasiReset() {
+
+  const jumlahScan = Object.keys(scanData).length;
+
+  if (jumlahScan === 0) {
+
+    alert("Belum ada data pengecekan.");
+
+    return;
+
+  }
+
+
+  const yakin = confirm(
+    "⚠️ RESET PENGECEKAN\n\n" +
+
+    "Semua hasil scan akan dihapus.\n" +
+    "Data Excel/master tetap dipertahankan.\n\n" +
+
+    "Yakin ingin reset?"
+  );
+
+
+  if (!yakin) {
+    return;
+  }
+
+
+  scanData = {};
+  scanOrder = [];
+
+  autoSave();
+  render();
+
+  alert("Pengecekan berhasil di-reset.");
+
+}
+
+
+// =====================================================
+// SUARA BEEP
+// =====================================================
+
+function beep() {
+
+  let audio = new Audio(
+    "https://www.soundjay.com/button/beep-07.wav"
+  );
+
+  audio.play().catch(() => {});
+
+}
+
+
+// =====================================================
+// LOAD EXCEL
+// =====================================================
+
+document
+.getElementById("fileInput")
+.addEventListener("change", function(e) {
+
+  let file = e.target.files[0];
+
+  if (!file) {
+    return;
+  }
+
+
+  let reader = new FileReader();
+
+
+  reader.onload = function(e) {
+
+    let data = new Uint8Array(
+      e.target.result
+    );
+
+
+    let workbook = XLSX.read(
+      data,
+      {
+        type: "array"
+      }
+    );
+
+
+    let sheet =
+      workbook.Sheets[
+        workbook.SheetNames[0]
+      ];
+
+
+    let json =
+      XLSX.utils.sheet_to_json(sheet);
+
+
+    master = {};
+
+
+    json.forEach(row => {
+
+      let kode =
+        String(row.KODE || "").trim();
+
+      let nama =
+        row.NAMA;
+
+      let qty =
+        Number(row.QTY) || 0;
+
+
+      if (kode) {
+
+        master[kode] = {
+
+          nama: nama || "-",
+
+          qty: qty || 0
+
+        };
+
+      }
+
+    });
+
+
+    // Karena upload Excel baru,
+    // pengecekan dimulai dari awal
+
+    scanData = {};
+    scanOrder = [];
+
+
+    autoSave();
+
+    render();
+
+
+    alert(
+      "Data Excel berhasil dimuat.\n\n" +
+      "Auto Save telah aktif."
+    );
+
+
+    document
+      .getElementById("scan")
+      .focus();
+
+  };
+
+
+  reader.readAsArrayBuffer(file);
+
+});
+
+
+// =====================================================
+// SCAN BARANG
+// =====================================================
+
+document
+.getElementById("scan")
+.addEventListener(
+  "keypress",
+  function(e) {
+
+    if (e.key === "Enter") {
+
+      let kode =
+        this.value.trim();
+
+
+      this.value = "";
+
+
+      if (!kode) {
+        return;
+      }
+
+
+      if (!scanData[kode]) {
+
+        scanData[kode] = 0;
+
+      }
+
+
+      scanData[kode]++;
+
+
+      scanOrder =
+        scanOrder.filter(
+          k => k !== kode
+        );
+
+
+      scanOrder.unshift(kode);
+
+
+      beep();
+
+
+      // AUTO SAVE
+      autoSave();
+
+
+      render();
+
+
+      document
+        .getElementById("scan")
+        .focus();
+
+    }
+
+  }
+);
+
+
+// =====================================================
+// TAMBAH
+// =====================================================
+
+function tambah(kode) {
+
+  scanData[kode] =
+    (scanData[kode] || 0) + 1;
+
+
+  scanOrder =
+    scanOrder.filter(
+      k => k !== kode
+    );
+
+
+  scanOrder.unshift(kode);
+
+
+  autoSave();
+
+  render();
+
+}
+
+
+// =====================================================
+// KURANG
+// =====================================================
+
+function kurang(kode) {
+
+  if (scanData[kode] > 0) {
+
+    scanData[kode]--;
+
+  }
+
+
+  scanOrder =
+    scanOrder.filter(
+      k => k !== kode
+    );
+
+
+  scanOrder.unshift(kode);
+
+
+  autoSave();
+
+  render();
+
+}
+
+
+// =====================================================
+// HAPUS
+// =====================================================
+
+function hapus(kode) {
+
+  const yakin = confirm(
+    "Hapus barang " + kode + " dari hasil pengecekan?"
+  );
+
+
+  if (!yakin) {
+    return;
+  }
+
+
+  delete scanData[kode];
+
+
+  scanOrder =
+    scanOrder.filter(
+      k => k !== kode
+    );
+
+
+  autoSave();
+
+  render();
+
+}
+
+
+// =====================================================
+// INPUT MANUAL
+// =====================================================
+
+function handleEnter(event, kode) {
+
+  if (event.key === "Enter") {
+
+    setQty(kode);
+
+  }
+
+}
+
+
+function setQty(kode) {
+
+  let inputEl =
+    document.getElementById(
+      "input_" + kode
+    );
+
+
+  let angka =
+    parseInt(inputEl.value);
+
+
+  if (
+    !isNaN(angka) &&
+    angka >= 0
+  ) {
+
+    scanData[kode] = angka;
+
+
+    scanOrder =
+      scanOrder.filter(
+        k => k !== kode
+      );
+
+
+    scanOrder.unshift(kode);
+
+
+    // AUTO SAVE
+    autoSave();
+
+  }
+
+
+  render();
+
+}
+
+
+// =====================================================
+// RENDER
+// =====================================================
+
+function render() {
+
+  let tabel =
+    document.getElementById("tabel");
+
+
+  tabel.innerHTML = `
+
+    <tr>
+
+      <th>KODE</th>
+
+      <th>NAMA</th>
+
+      <th>QTY INPUT</th>
+
+      <th>QTY SCAN</th>
+
+      <th>INPUT MANUAL</th>
+
+      <th>STATUS</th>
+
+      <th>AKSI</th>
+
+    </tr>
+
+  `;
+
+
+  let masterOnly =
+    Object.keys(master)
+      .filter(
+        kode => !scanData[kode]
+      );
+
+
+  let allKode = [
+    ...scanOrder,
+    ...masterOnly
+  ];
+
+
+  allKode.forEach(
+    (kode, index) => {
+
+      let nama =
+        master[kode]?.nama ||
+        "(Tidak Ada)";
+
+
+      let inputQty =
+        master[kode]?.qty || 0;
+
+
+      let scanQty =
+        scanData[kode] || 0;
+
+
+      let status = "";
+
+      let warna = "";
+
+
+      if (scanQty === inputQty) {
+
+        status = "SESUAI";
+
+        warna = "lightgreen";
+
+      }
+
+      else if (
+        scanQty < inputQty
+      ) {
+
+        status = "KURANG";
+
+        warna = "lightcoral";
+
+      }
+
+      else {
+
+        status = "LEBIH";
+
+        warna = "khaki";
+
+      }
+
+
+      // Barang terakhir discan
+      // menjadi warna biru
+
+      if (
+        index === 0 &&
+        scanOrder.length > 0
+      ) {
+
+        warna = "#8ec5ff";
+
+      }
+
+
+      tabel.innerHTML += `
+
+        <tr style="background:${warna}">
+
+          <td>${kode}</td>
+
+          <td>${nama}</td>
+
+          <td>${inputQty}</td>
+
+          <td>${scanQty}</td>
+
+          <td>
+
+            <input
+
+              type="number"
+
+              id="input_${kode}"
+
+              style="width:60px"
+
+              onkeypress="handleEnter(event, '${kode}')"
+
+            >
+
+          </td>
+
+          <td>
+
+            <b>${status}</b>
+
+          </td>
+
+          <td>
+
+            <button
+              onclick="tambah('${kode}')"
+            >
+              +
+            </button>
+
+            <button
+              onclick="kurang('${kode}')"
+            >
+              -
+            </button>
+
+            <button
+              onclick="hapus('${kode}')"
+            >
+              Hapus
+            </button>
+
+          </td>
+
+        </tr>
+
+      `;
+
+    }
+  );
+
+
+  document
+    .getElementById("scan")
+    .focus();
+
+}
+
+
+// =====================================================
+// PERINGATAN REFRESH / TUTUP BROWSER
+// =====================================================
+
+window.addEventListener(
+  "beforeunload",
+  function(event) {
+
+    // Hanya memberikan peringatan
+    // jika ada data pekerjaan
+
+    const adaData =
+      Object.keys(master).length > 0 ||
+      Object.keys(scanData).length > 0;
+
+
+    if (adaData) {
+
+      // Pastikan data terakhir tersimpan
+      autoSave();
+
+
+      // Browser modern akan menampilkan
+      // dialog konfirmasi standar
+
+      event.preventDefault();
+
+      event.returnValue = "";
+
+    }
+
+  }
+);
+
+
+// =====================================================
+// EXPORT EXCEL
+// =====================================================
+
+function exportExcel() {
+
+  let data = [];
+
+
+  scanOrder.forEach(
+    kode => {
+
+      let nama =
+        master[kode]?.nama ||
+        "(Tidak Ada)";
+
+
+      let inputQty =
+        master[kode]?.qty || 0;
+
+
+      let scanQty =
+        scanData[kode] || 0;
+
+
+      let status = "";
+
+
+      if (
+        scanQty === inputQty
+      ) {
+
+        status = "SESUAI";
+
+      }
+
+      else if (
+        scanQty < inputQty
+      ) {
+
+        status = "KURANG";
+
+      }
+
+      else {
+
+        status = "LEBIH";
+
+      }
+
+
+      data.push({
+
+        "KODE": kode,
+
+        "NAMA": nama,
+
+        "QTY INPUT": inputQty,
+
+        "QTY SCAN": scanQty,
+
+        "STATUS": status
+
+      });
+
+    }
+  );
+
+
+  // Barang belum discan
+
+  Object.keys(master).forEach(
+    kode => {
+
+      if (!scanData[kode]) {
+
+        let nama =
+          master[kode]?.nama ||
+          "(Tidak Ada)";
+
+
+        let inputQty =
+          master[kode]?.qty || 0;
+
+
+        data.push({
+
+          "KODE": kode,
+
+          "NAMA": nama,
+
+          "QTY INPUT": inputQty,
+
+          "QTY SCAN": 0,
+
+          "STATUS":
+            inputQty === 0
+              ? "SESUAI"
+              : "KURANG"
+
+        });
+
+      }
+
+    }
+  );
+
+
+  if (data.length === 0) {
+
+    alert(
+      "Belum ada data untuk diekspor."
+    );
+
+    return;
+
+  }
+
+
+  let worksheet =
+    XLSX.utils.json_to_sheet(data);
+
+
+  worksheet["!cols"] = [
+
+    { wch: 20 },
+
+    { wch: 40 },
+
+    { wch: 12 },
+
+    { wch: 12 },
+
+    { wch: 15 }
+
+  ];
+
+
+  let workbook =
+    XLSX.utils.book_new();
+
+
+  XLSX.utils.book_append_sheet(
+
+    workbook,
+
+    worksheet,
+
+    "Hasil Cek"
+
+  );
+
+
+  XLSX.writeFile(
+    workbook,
+    "Hasil_Cek_Barang.xlsx"
+  );
+
+}
+
+
+// =====================================================
+// JALANKAN SAAT HALAMAN DIBUKA
+// =====================================================
+
+window.addEventListener(
+  "load",
+  function() {
+
+    cekDataTersimpan();
+
+    document
+      .getElementById("scan")
+      .focus();
+
+  }
+);
+
+</script>
+
+</body>
+</html>
